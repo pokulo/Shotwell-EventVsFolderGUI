@@ -1,0 +1,8 @@
+folder  # event # text      # action
+true    # true  # len() = 0 # rename folder to be like event name (doesn't affect files, not in folder)
+true    # true  # len() > 0 # rename folder and event to new name (doesn't affect files, not in folder)
+true    # false # len() = 0 # assign photos of a folder to an event named like folder
+true    # false # len() > 0 # assign photos of a folder to a possibly new event
+false   # true  # len() = 0 # move all files of event in one folder
+false   # true  # len() > 0 # move all files of event in one folder (and rename both)
+false   # false # *         # don't do anything
