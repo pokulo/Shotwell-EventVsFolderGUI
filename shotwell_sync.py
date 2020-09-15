@@ -3,7 +3,7 @@ import sqlalchemy as sql
 from sqlalchemy.ext.declarative import declarative_base
 import gi 
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk
+from gi.repository import Gtk, GdkPixbuf
 import datetime as dt
 import os
 
@@ -45,7 +45,11 @@ class Video(Base):
 class Thumbnail(Gtk.Image):
     def __init__(self, filename):
         super(Thumbnail, self).__init__()
-        self.set_from_file(filename)
+
+        pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(filename, width=220, height=220,preserve_aspect_ratio=True)
+
+        self.set_from_pixbuf(pixbuf)
+        self
 
 class Issue:
     def __init__(self, folder, event, files):
