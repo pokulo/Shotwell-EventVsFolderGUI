@@ -1,4 +1,10 @@
 #! /usr/bin/python3
+# encoding: utf-8
+from concurrent.futures._base import Future
+from concurrent.futures.thread import ThreadPoolExecutor
+from logging import warning
+from threading import Lock
+
 import sqlalchemy as sql
 from sqlalchemy.ext.declarative import declarative_base
 import gi 
@@ -8,6 +14,8 @@ import datetime as dt
 import os
 
 Base = declarative_base()
+
+thread_pool = ThreadPoolExecutor()
 
 
 class Event(Base):
@@ -132,6 +140,8 @@ class MatchFolderEventWindow(Gtk.Window):
         self.results = {}
         self.thumbnails = []
         self.dbsession = dbsession
+        self._busy_lock = Lock()
+        self._busy_future = Future()
 
         #GUI
         Gtk.Window.__init__(self, title="Shotwell folder  <-> event sync")
@@ -150,29 +160,37 @@ class MatchFolderEventWindow(Gtk.Window):
         select_all_button.connect("clicked", self.toggle_select_all_images)
         vbox.pack_start(select_all_button, False, False, 0)
 
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._busy_stack = Gtk.Stack()
 
-        self.thumbnailgrid = Gtk.FlowBox()
+        self._scrolled_thumbnails = Gtk.ScrolledWindow()
+        self._scrolled_thumbnails.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+
+        self._spinner = Gtk.Spinner()
+        self._busy_stack.add(self._spinner)
+
+        self._thumbnailgrid = Gtk.FlowBox()
         # self.thumbnailgrid.set_selection_mode(mode=Gtk.SelectionMode.SELECTION_MULTIPLE)
-        self.thumbnailgrid.set_valign(Gtk.Align.START)
-        self.thumbnailgrid.set_max_children_per_line(30)
-        self.thumbnailgrid.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._thumbnailgrid.set_valign(Gtk.Align.START)
+        self._thumbnailgrid.set_max_children_per_line(30)
+        self._thumbnailgrid.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._done()
+        self._busy_stack.show_all()
 
-        scrolled.add(self.thumbnailgrid)
-        vbox.pack_start(scrolled, True, True, 0)
+        self._scrolled_thumbnails.add(self._thumbnailgrid)
+        self._busy_stack.add(self._scrolled_thumbnails)
+        vbox.pack_start(self._busy_stack, True, True, 0)
 
         self.button = []
         chooseBox = Gtk.Box(spacing=6)
         vbox.pack_start(chooseBox, False, True, 0)
 
-        path_label = Gtk.Label("Pfad:")
+        path_label = Gtk.Label(label="Pfad:")
         chooseBox.pack_start(path_label, False, True, 0)
         self.button.insert(self._PATH, Gtk.ToggleButton(label="Pfad"))
         self.button[self._PATH].connect("toggled", self.chose, self._PATH)
         chooseBox.pack_start(self.button[self._PATH], True, True, 0)
 
-        event_label = Gtk.Label("Event:")
+        event_label = Gtk.Label(label="Event:")
         chooseBox.pack_start(event_label, False, True, 0)
         self.button.insert(self._EVENT, Gtk.ToggleButton(label="Event"))
         self.button[self._EVENT].connect("toggled", self.chose, self._EVENT)
@@ -199,21 +217,48 @@ class MatchFolderEventWindow(Gtk.Window):
 
         self.scan()
 
+    def _busy(self):
+        self._spinner.start()
+        self._busy_stack.set_visible_child(self._spinner)
+
+    def _done(self):
+        self._spinner.stop()
+        self._busy_stack.set_visible_child(self._scrolled_thumbnails)
+
     def toggle_select_all_images(self, sender):
         all_selected = all(image_button.selected for image_button, image_file in self.thumbnails)
         for image_button, image_file in self.thumbnails:
             image_button.selected = not all_selected
 
+    def add_images_async(self, issue):
+        try:
+            self._busy_lock.acquire(timeout=0)
+        except TimeoutError:
+            return
+        else:
+            if self._busy_lock.locked():
+                self._busy()
+                self._busy_future = thread_pool.submit(self.add_images, issue=issue)
+                self._busy_future.add_done_callback(self.add_images_done)
+
     def add_images(self, issue):
         for image_file in issue.files:
             image_button = ThumbnailButton(image_file.filename)
             self.thumbnails.append((image_button, image_file))
-            self.thumbnailgrid.add(image_button)
-        self.thumbnailgrid.show_all()
+            self._thumbnailgrid.add(image_button)
+
+    def add_images_done(self, future):
+        self._thumbnailgrid.show_all()
+        self._done()
+        if self._busy_lock.locked():
+            self._busy_lock.release()
+        else:
+            warning(msg="self._busy_lock allready released!?")
+        future.result()  # raise catched exceptions
 
     def clear_images(self):
         for image_button, image_file in self.thumbnails:
-            self.thumbnailgrid.remove(image_button)
+            self._thumbnailgrid.remove(image_button)
         self.thumbnails.clear()
 
     def scan(self):
@@ -247,7 +292,7 @@ class MatchFolderEventWindow(Gtk.Window):
         self.button[self._PATH].set_label("{0:^50}".format(issue.folder))
         self.button[self._EVENT].set_label("{0:^50}".format(issue.event.name))
         self.clear_images()
-        self.add_images(issue)
+        self.add_images_async(issue)
 
     def chose(self, button, chosen):
         if button.get_active() and not self.button[not chosen].get_active():
@@ -264,10 +309,11 @@ class MatchFolderEventWindow(Gtk.Window):
             self.entry.connect("changed", self.text_changed)
 
     def next(self, button, direction):
+        current_issue = self._data_iter.this()
         if self.button[self._EVENT].get_active() or self.button[self._PATH].get_active():
-            self.results[self._data_iter.key()] = (self.entry.get_text(), self._data_iter.this())
+            self.results[self._data_iter.key()] = (self.entry.get_text(), )
         else:
-            self.results[self._data_iter.key()] = (None, self._data_iter.this())
+            self.results[self._data_iter.key()] = (None, current_issue)
         if direction:
             current_issue = self._data_iter.next()
         else:
