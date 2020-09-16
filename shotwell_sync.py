@@ -122,7 +122,7 @@ class Data(dict):
         return DataIter(self)
 
 
-class ToggleButtonWindow(Gtk.Window):
+class MatchFolderEventWindow(Gtk.Window):
     _EVENT = 1
     _PATH = 0
 
@@ -146,10 +146,7 @@ class ToggleButtonWindow(Gtk.Window):
         self.label = Gtk.Label()
         vbox.pack_start(self.label, False, True, 0)
 
-        chooseBox = Gtk.Box(spacing=6)
-        vbox.pack_start(chooseBox, False, True, 0)
-
-        select_all_button = Gtk.Button("Alle Auswählen")
+        select_all_button = Gtk.Button(label="Alle Auswählen")
         select_all_button.connect("clicked", self.toggle_select_all_images)
         vbox.pack_start(select_all_button, False, False, 0)
 
@@ -157,6 +154,7 @@ class ToggleButtonWindow(Gtk.Window):
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
         self.thumbnailgrid = Gtk.FlowBox()
+        # self.thumbnailgrid.set_selection_mode(mode=Gtk.SelectionMode.SELECTION_MULTIPLE)
         self.thumbnailgrid.set_valign(Gtk.Align.START)
         self.thumbnailgrid.set_max_children_per_line(30)
         self.thumbnailgrid.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -165,18 +163,25 @@ class ToggleButtonWindow(Gtk.Window):
         vbox.pack_start(scrolled, True, True, 0)
 
         self.button = []
-        self.button.insert(self._PATH, Gtk.ToggleButton("Pfad"))
+        chooseBox = Gtk.Box(spacing=6)
+        vbox.pack_start(chooseBox, False, True, 0)
+
+        path_label = Gtk.Label("Pfad:")
+        chooseBox.pack_start(path_label, False, True, 0)
+        self.button.insert(self._PATH, Gtk.ToggleButton(label="Pfad"))
         self.button[self._PATH].connect("toggled", self.chose, self._PATH)
         chooseBox.pack_start(self.button[self._PATH], True, True, 0)
 
-        self.button.insert(self._EVENT, Gtk.ToggleButton("Event"))
+        event_label = Gtk.Label("Event:")
+        chooseBox.pack_start(event_label, False, True, 0)
+        self.button.insert(self._EVENT, Gtk.ToggleButton(label="Event"))
         self.button[self._EVENT].connect("toggled", self.chose, self._EVENT)
         chooseBox.pack_start(self.button[self._EVENT], True, True, 0)
 
         CASBox = Gtk.Box(spacing=6)
         vbox.pack_start(CASBox, False, True, 0)
 
-        lastButton = Gtk.Button("last", use_underline=True)
+        lastButton = Gtk.Button(label="last", use_underline=True)
         lastButton.connect("clicked", self.next, False)
         CASBox.pack_start(lastButton, True, True, 0)
 
@@ -184,11 +189,11 @@ class ToggleButtonWindow(Gtk.Window):
         self.entry.connect("changed", self.text_changed)
         CASBox.pack_start(self.entry, True, True, 0)
 
-        nextButton = Gtk.Button("next", use_underline=True)
+        nextButton = Gtk.Button(label="next", use_underline=True)
         nextButton.connect("clicked", self.next, True)
         CASBox.pack_start(nextButton, True, True, 0)
 
-        commitButton = Gtk.Button("commit", use_underline=True)
+        commitButton = Gtk.Button(label="commit", use_underline=True)
         commitButton.connect("clicked", self.commit)
         CASBox.pack_start(commitButton, True, True, 0)
 
@@ -201,10 +206,15 @@ class ToggleButtonWindow(Gtk.Window):
 
     def add_images(self, issue):
         for image_file in issue.files:
-            print(image_file.filename)
             image_button = ThumbnailButton(image_file.filename)
             self.thumbnails.append((image_button, image_file))
             self.thumbnailgrid.add(image_button)
+        self.thumbnailgrid.show_all()
+
+    def clear_images(self):
+        for image_button, image_file in self.thumbnails:
+            self.thumbnailgrid.remove(image_button)
+        self.thumbnails.clear()
 
     def scan(self):
         for e in self.dbsession.query(Event).all():
@@ -230,12 +240,13 @@ class ToggleButtonWindow(Gtk.Window):
         self.progressbar.set_text("%s of %s" % (0, len(self._data)))
         self.progressbar.set_show_text(True)
         self._data_iter = iter(self._data)
-        self.fill_view(next(self._data_iter))
+        self.next(None, True)
 
     def fill_view(self, issue: Issue):
         print(issue.folder, issue.event)
         self.button[self._PATH].set_label("{0:^50}".format(issue.folder))
         self.button[self._EVENT].set_label("{0:^50}".format(issue.event.name))
+        self.clear_images()
         self.add_images(issue)
 
     def chose(self, button, chosen):
@@ -258,11 +269,10 @@ class ToggleButtonWindow(Gtk.Window):
         else:
             self.results[self._data_iter.key()] = (None, self._data_iter.this())
         if direction:
-            current = self._data_iter.next()
+            current_issue = self._data_iter.next()
         else:
-            current = self._data_iter.prev()
-        self.button[self._PATH].set_label("{0:^50}".format(current[self._PATH]))
-        self.button[self._EVENT].set_label("{0:^50}".format(current[self._EVENT]))
+            current_issue = self._data_iter.prev()
+        self.fill_view(current_issue)
         self.progressbar.set_fraction((int(self._data_iter) + 1.0) / len(self._data))
         self.progressbar.set_text("%2s of %2s" % (int(self._data_iter), len(self._data)))
         if self._data_iter.key() in self.results:
@@ -339,7 +349,7 @@ if __name__ == "__main__":
     connection = engine.connect()
     Session = sql.orm.sessionmaker(bind=engine)
 
-    win = ToggleButtonWindow(Session())
+    win = MatchFolderEventWindow(Session())
     win.connect("delete-event", Gtk.main_quit)
     win.show_all()
     Gtk.main()
