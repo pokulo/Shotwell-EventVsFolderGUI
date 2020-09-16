@@ -9,7 +9,7 @@ import sqlalchemy as sql
 from sqlalchemy.ext.declarative import declarative_base
 import gi 
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, GdkPixbuf
+from gi.repository import Gtk, GdkPixbuf, GLib
 import datetime as dt
 import os
 
@@ -230,7 +230,7 @@ class MatchFolderEventWindow(Gtk.Window):
         for image_button, image_file in self.thumbnails:
             image_button.selected = not all_selected
 
-    def add_images_async(self, issue):
+    def _add_images_async(self, issue):
         try:
             self._busy_lock.acquire(timeout=0)
         except TimeoutError:
@@ -238,23 +238,29 @@ class MatchFolderEventWindow(Gtk.Window):
         else:
             if self._busy_lock.locked():
                 self._busy()
-                self._busy_future = thread_pool.submit(self.add_images, issue=issue)
-                self._busy_future.add_done_callback(self.add_images_done)
+                self._busy_future = thread_pool.submit(self._add_images, issue=issue)
+                self._busy_future.add_done_callback(self._add_images_done_callback)
 
-    def add_images(self, issue):
+    def _add_images(self, issue):
         for image_file in issue.files:
-            image_button = ThumbnailButton(image_file.filename)
-            self.thumbnails.append((image_button, image_file))
-            self._thumbnailgrid.add(image_button)
+            GLib.idle_add(self._add_image, image_file)
 
-    def add_images_done(self, future):
+    def _add_image(self, image_file):
+        image_button = ThumbnailButton(image_file.filename)
+        self.thumbnails.append((image_button, image_file))
+        self._thumbnailgrid.add(image_button)
+
+    def _add_images_done_callback(self, future):
+        GLib.idle_add(self._add_images_done)
+
+    def _add_images_done(self):
         self._thumbnailgrid.show_all()
         self._done()
         if self._busy_lock.locked():
             self._busy_lock.release()
         else:
             warning(msg="self._busy_lock allready released!?")
-        future.result()  # raise catched exceptions
+        self._busy_future.result()  # raise catched exceptions
 
     def clear_images(self):
         for image_button, image_file in self.thumbnails:
@@ -292,7 +298,7 @@ class MatchFolderEventWindow(Gtk.Window):
         self.button[self._PATH].set_label("{0:^50}".format(issue.folder))
         self.button[self._EVENT].set_label("{0:^50}".format(issue.event.name))
         self.clear_images()
-        self.add_images_async(issue)
+        self._add_images_async(issue)
 
     def chose(self, button, chosen):
         if button.get_active() and not self.button[not chosen].get_active():
