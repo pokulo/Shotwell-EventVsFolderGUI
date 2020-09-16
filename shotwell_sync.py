@@ -238,16 +238,17 @@ class MatchFolderEventWindow(Gtk.Window):
         else:
             if self._busy_lock.locked():
                 self._busy()
-                self._busy_future = thread_pool.submit(self._add_images, issue=issue)
+                self.clear_images()
+                self._busy_future = thread_pool.submit(self._load_images, issue=issue)
                 self._busy_future.add_done_callback(self._add_images_done_callback)
 
-    def _add_images(self, issue):
+    def _load_images(self, issue):
         for image_file in issue.files:
-            GLib.idle_add(self._add_image, image_file)
+            image_button = ThumbnailButton(image_file.filename)
+            self.thumbnails.append((image_button, image_file))
+            GLib.idle_add(self._add_image, image_button)
 
-    def _add_image(self, image_file):
-        image_button = ThumbnailButton(image_file.filename)
-        self.thumbnails.append((image_button, image_file))
+    def _add_image(self, image_button):
         self._thumbnailgrid.add(image_button)
 
     def _add_images_done_callback(self, future):
@@ -297,7 +298,6 @@ class MatchFolderEventWindow(Gtk.Window):
         print(issue.folder, issue.event)
         self.button[self._PATH].set_label("{0:^50}".format(issue.folder))
         self.button[self._EVENT].set_label("{0:^50}".format(issue.event.name))
-        self.clear_images()
         self._add_images_async(issue)
 
     def chose(self, button, chosen):
