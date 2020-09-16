@@ -9,6 +9,7 @@ import os
 
 Base = declarative_base()
 
+
 class Event(Base):
     sqlite_autoincrement=True
     __tablename__ = "eventtable"
@@ -27,12 +28,14 @@ class Event(Base):
     def __str__(self):
         return "<Event id=%s name=%s>" % (self.id, self.name)
 
+
 class Photo(Base):
     __tablename__ = "phototable"
     id = sql.Column(sql.Integer, primary_key=True)
     event_id = sql.Column(sql.Integer, sql.schema.ForeignKey(Event.id))
     event = sql.orm.relationship(Event, backref=sql.orm.backref('photos'))
     filename = sql.Column(sql.Unicode)
+
 
 class Video(Base):
     __tablename__ = "videotable"
@@ -42,14 +45,23 @@ class Video(Base):
     filename = sql.Column(sql.Unicode)
 
 
-class Thumbnail(Gtk.Image):
+class ThumbnailButton(Gtk.CheckButton):
     def __init__(self, filename):
-        super(Thumbnail, self).__init__()
-
+        super(ThumbnailButton, self).__init__()
+        self.set_mode(draw_indicator=False)
+        self._image = Gtk.Image()
         pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(filename, width=220, height=220,preserve_aspect_ratio=True)
+        self._image.set_from_pixbuf(pixbuf)
+        self.set_image(self._image)
 
-        self.set_from_pixbuf(pixbuf)
-        self
+    @property
+    def selected(self):
+        return self.get_active()
+
+    @selected.setter
+    def selected(self, active):
+        self.set_active(active)
+
 
 class Issue:
     def __init__(self, folder, event, files):
@@ -115,7 +127,7 @@ class ToggleButtonWindow(Gtk.Window):
     _PATH = 0
 
     def __init__(self, dbsession):
-        self._data_iter = 0
+        self._data_iter = None
         self._data = Data()
         self.results = {}
         self.thumbnails = []
@@ -129,13 +141,17 @@ class ToggleButtonWindow(Gtk.Window):
         self.add(vbox)
 
         self.progressbar = Gtk.ProgressBar()
-        vbox.pack_start(self.progressbar, True, True, 0)
+        vbox.pack_start(self.progressbar, False, True, 0)
 
         self.label = Gtk.Label()
-        vbox.pack_start(self.label, True, True, 0)
+        vbox.pack_start(self.label, False, True, 0)
 
         chooseBox = Gtk.Box(spacing=6)
-        vbox.pack_start(chooseBox, True, True, 0)
+        vbox.pack_start(chooseBox, False, True, 0)
+
+        select_all_button = Gtk.Button("Alle Auswählen")
+        select_all_button.connect("clicked", self.toggle_select_all_images)
+        vbox.pack_start(select_all_button, False, False, 0)
 
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -158,7 +174,7 @@ class ToggleButtonWindow(Gtk.Window):
         chooseBox.pack_start(self.button[self._EVENT], True, True, 0)
 
         CASBox = Gtk.Box(spacing=6)
-        vbox.pack_start(CASBox, True, True, 0)
+        vbox.pack_start(CASBox, False, True, 0)
 
         lastButton = Gtk.Button("last", use_underline=True)
         lastButton.connect("clicked", self.next, False)
@@ -178,12 +194,17 @@ class ToggleButtonWindow(Gtk.Window):
 
         self.scan()
 
+    def toggle_select_all_images(self, sender):
+        all_selected = all(image_button.selected for image_button, image_file in self.thumbnails)
+        for image_button, image_file in self.thumbnails:
+            image_button.selected = not all_selected
+
     def add_images(self, issue):
-        for p in issue.files:
-            print(p.filename)
-            i = Thumbnail(p.filename)
-            self.thumbnails.append((i, p))
-            self.thumbnailgrid.add(i)
+        for image_file in issue.files:
+            print(image_file.filename)
+            image_button = ThumbnailButton(image_file.filename)
+            self.thumbnails.append((image_button, image_file))
+            self.thumbnailgrid.add(image_button)
 
     def scan(self):
         for e in self.dbsession.query(Event).all():
