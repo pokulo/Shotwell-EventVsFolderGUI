@@ -165,8 +165,18 @@ class MatchFolderEventWindow(Gtk.Window):
         self._scrolled_thumbnails = Gtk.ScrolledWindow()
         self._scrolled_thumbnails.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
 
+        self._busy_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+
         self._spinner = Gtk.Spinner()
-        self._busy_stack.add(self._spinner)
+        self._busy_vbox.pack_start(self._spinner, True, True, 0)
+
+        self._busy_progressbar = Gtk.ProgressBar()
+        self._busy_progressbar.set_show_text(True)
+        self.set_busy_fraction(0, 1)
+
+        self._busy_vbox.pack_start(self._busy_progressbar, False, True, 0)
+
+        self._busy_stack.add(self._busy_vbox)
 
         self._thumbnailgrid = Gtk.FlowBox()
         # self.thumbnailgrid.set_selection_mode(mode=Gtk.SelectionMode.SELECTION_MULTIPLE)
@@ -174,11 +184,12 @@ class MatchFolderEventWindow(Gtk.Window):
         self._thumbnailgrid.set_max_children_per_line(30)
         self._thumbnailgrid.set_selection_mode(Gtk.SelectionMode.NONE)
         self._done()
-        self._busy_stack.show_all()
 
         self._scrolled_thumbnails.add(self._thumbnailgrid)
         self._busy_stack.add(self._scrolled_thumbnails)
         vbox.pack_start(self._busy_stack, True, True, 0)
+
+        self._busy_stack.show_all()
 
         self.button = []
         chooseBox = Gtk.Box(spacing=6)
@@ -217,9 +228,13 @@ class MatchFolderEventWindow(Gtk.Window):
 
         self.scan()
 
+    def set_busy_fraction(self, fraction, all):
+        self._busy_progressbar.set_fraction(fraction/all)
+        self._busy_progressbar.set_text("%s of %s" % (fraction, all))
+
     def _busy(self):
         self._spinner.start()
-        self._busy_stack.set_visible_child(self._spinner)
+        self._busy_stack.set_visible_child(self._busy_vbox)
 
     def _done(self):
         self._spinner.stop()
@@ -243,10 +258,12 @@ class MatchFolderEventWindow(Gtk.Window):
                 self._busy_future.add_done_callback(self._add_images_done_callback)
 
     def _load_images(self, issue):
-        for image_file in issue.files:
+        files_len = len(issue.files)
+        for i, image_file in enumerate(issue.files):
             image_button = ThumbnailButton(image_file.filename)
             self.thumbnails.append((image_button, image_file))
             GLib.idle_add(self._add_image, image_button)
+            self.set_busy_fraction(i, files_len)
 
     def _add_image(self, image_button):
         self._thumbnailgrid.add(image_button)
