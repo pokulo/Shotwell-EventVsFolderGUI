@@ -65,23 +65,14 @@ class MatchFolderEventWindow(Gtk.Window):
         select_all_button.connect("clicked", self.toggle_select_all_images)
         vbox.pack_start(select_all_button, False, False, 0)
 
-        self._busy_stack = Gtk.Stack()
-
         self._scrolled_thumbnails = Gtk.ScrolledWindow()
         self._scrolled_thumbnails.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-
-        self._busy_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-
-        self._spinner = Gtk.Spinner()
-        self._busy_vbox.pack_start(self._spinner, True, True, 0)
 
         self._busy_progressbar = Gtk.ProgressBar()
         self._busy_progressbar.set_show_text(True)
         self.set_busy_fraction(0, 1)
 
-        self._busy_vbox.pack_start(self._busy_progressbar, False, True, 0)
-
-        self._busy_stack.add(self._busy_vbox)
+        vbox.pack_start(self._busy_progressbar, False, True, 0)
 
         self._thumbnailgrid_lock = Lock()
         self._thumbnailgrid = Gtk.FlowBox()
@@ -92,10 +83,7 @@ class MatchFolderEventWindow(Gtk.Window):
         self._done()
 
         self._scrolled_thumbnails.add(self._thumbnailgrid)
-        self._busy_stack.add(self._scrolled_thumbnails)
-        vbox.pack_start(self._busy_stack, True, True, 0)
-
-        self._busy_stack.show_all()
+        vbox.pack_start(self._scrolled_thumbnails, True, True, 0)
 
         self.button = []
         chooseBox = Gtk.Box(spacing=6)
@@ -139,12 +127,10 @@ class MatchFolderEventWindow(Gtk.Window):
         self._busy_progressbar.set_text("%s of %s" % (fraction, all))
 
     def _busy(self):
-        self._spinner.start()
-        self._busy_stack.set_visible_child(self._busy_vbox)
+        pass
 
     def _done(self):
-        self._spinner.stop()
-        self._busy_stack.set_visible_child(self._scrolled_thumbnails)
+        pass
 
     def toggle_select_all_images(self, sender):
         all_selected = all(image_button.selected for image_button, image_file in self.thumbnails)
@@ -153,34 +139,31 @@ class MatchFolderEventWindow(Gtk.Window):
 
     def _add_images_async(self, issue):
         try:
-            self._busy_lock.acquire(timeout=0)
-        except TimeoutError:
-            return
-        else:
-            if self._busy_lock.locked():
+            if self._busy_lock.acquire(timeout=0):
                 self._busy()
                 self.clear_images()
                 self._busy_future = thread_pool.submit(self._load_images, issue=issue)
                 self._busy_future.add_done_callback(self._add_images_done_callback)
+        except TimeoutError:
+            pass
 
     def _load_images(self, issue):
         files_len = len(issue.files)
         for i, image_file in enumerate(issue.files):
             image_button = ThumbnailButton(image_file.filename)
             GLib.idle_add(self._add_image, image_button, image_file)
-            self.set_busy_fraction(i, files_len)
+            self.set_busy_fraction(i+1, files_len)
 
     def _add_image(self, image_button, image_file):
         with self._thumbnailgrid_lock:
             self.thumbnails.append((image_button, image_file))
             self._thumbnailgrid.add(image_button)
+            self._thumbnailgrid.show_all()
 
     def _add_images_done_callback(self, future):
         GLib.idle_add(self._add_images_done)
 
     def _add_images_done(self):
-        with self._thumbnailgrid_lock:
-            self._thumbnailgrid.show_all()
         self._done()
         if self._busy_lock.locked():
             self._busy_lock.release()
@@ -190,8 +173,11 @@ class MatchFolderEventWindow(Gtk.Window):
 
     def clear_images(self):
         with self._thumbnailgrid_lock:
-            for i, (image_button, image_file) in enumerate(self.thumbnails):
-                image_button.destroy()  # automatically removed from container self._thumbnailgrid
+            for thumbnail_fb_child in self._thumbnailgrid.get_children():
+                self._thumbnailgrid.remove(thumbnail_fb_child)
+            self._thumbnailgrid.hide()
+            childcount = len(self._thumbnailgrid.get_children())
+            print(childcount)
             self.thumbnails.clear()
 
     def scan(self):
