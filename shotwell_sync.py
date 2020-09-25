@@ -47,6 +47,7 @@ class MatchFolderEventWindow(Gtk.Window):
         self.dbsession = dbsession
         self._busy_lock = Lock()
         self._busy_future = Future()
+        self._cancel_future = Future()
 
         #GUI
         Gtk.Window.__init__(self, title="Shotwell folder  <-> event sync")
@@ -138,18 +139,18 @@ class MatchFolderEventWindow(Gtk.Window):
             image_button.selected = not all_selected
 
     def _add_images_async(self, issue):
-        try:
-            if self._busy_lock.acquire(timeout=0):
-                self._busy()
-                self.clear_images()
-                self._busy_future = thread_pool.submit(self._load_images, issue=issue)
-                self._busy_future.add_done_callback(self._add_images_done_callback)
-        except TimeoutError:
-            pass
+        self._busy()
+        self.clear_images()
+        self._cancel_future.cancel()
+        self._cancel_future = Future()
+        self._busy_future = thread_pool.submit(self._load_images, issue=issue, cancel_future=self._cancel_future)
+        self._busy_future.add_done_callback(self._add_images_done_callback)
 
-    def _load_images(self, issue):
+    def _load_images(self, issue, cancel_future):
         files_len = len(issue.files)
         for i, image_file in enumerate(issue.files):
+            if cancel_future.cancelled():
+                break
             image_button = ThumbnailButton(image_file.filename)
             GLib.idle_add(self._add_image, image_button, image_file)
             self.set_busy_fraction(i+1, files_len)
@@ -168,7 +169,7 @@ class MatchFolderEventWindow(Gtk.Window):
         if self._busy_lock.locked():
             self._busy_lock.release()
         else:
-            warning(msg="self._busy_lock allready released!?")
+            raise Exception("Programming error: self._busy_lock allready released!?")
         self._busy_future.result()  # raise catched exceptions
 
     def clear_images(self):
@@ -227,30 +228,34 @@ class MatchFolderEventWindow(Gtk.Window):
             self.entry.connect("changed", self.text_changed)
 
     def next(self, button, direction):
-        current_issue = self._data_iter.this()
-        if self.button[self._EVENT].get_active() or self.button[self._PATH].get_active():
-            self.results[self._data_iter.key()] = (self.entry.get_text(), )
-        else:
-            self.results[self._data_iter.key()] = (None, current_issue)
-        if direction:
-            current_issue = self._data_iter.next()
-        else:
-            current_issue = self._data_iter.prev()
-        self.fill_view(current_issue)
-        self.progressbar.set_fraction((int(self._data_iter) + 1.0) / len(self._data))
-        self.progressbar.set_text("%2s of %2s" % (int(self._data_iter), len(self._data)))
-        if self._data_iter.key() in self.results:
-            tmp = self.results[self._data_iter.key()]
-            if tmp[0] is not None:
-                self.button[self._PATH].set_active(tmp[0] == tmp[1][0])
-                self.button[self._EVENT].set_active(tmp[0] == tmp[1][1])
-                self.entry.set_text(tmp[0])
-            else:
-                self.entry.set_text("")
-        else:
-            self.button[self._PATH].set_active(False)
-            self.button[self._EVENT].set_active(False)
-            self.entry.set_text("")
+        try:
+            if self._busy_lock.acquire(timeout=0):
+                current_issue = self._data_iter.this()
+                if self.button[self._EVENT].get_active() or self.button[self._PATH].get_active():
+                    self.results[self._data_iter.key()] = (self.entry.get_text(), )
+                else:
+                    self.results[self._data_iter.key()] = (None, current_issue)
+                if direction:
+                    current_issue = self._data_iter.next()
+                else:
+                    current_issue = self._data_iter.prev()
+                self.fill_view(current_issue)
+                self.progressbar.set_fraction((int(self._data_iter) + 1.0) / len(self._data))
+                self.progressbar.set_text("%2s of %2s" % (int(self._data_iter), len(self._data)))
+                if self._data_iter.key() in self.results:
+                    tmp = self.results[self._data_iter.key()]
+                    if tmp[0] is not None:
+                        self.button[self._PATH].set_active(tmp[0] == tmp[1][0])
+                        self.button[self._EVENT].set_active(tmp[0] == tmp[1][1])
+                        self.entry.set_text(tmp[0])
+                    else:
+                        self.entry.set_text("")
+                else:
+                    self.button[self._PATH].set_active(False)
+                    self.button[self._EVENT].set_active(False)
+                    self.entry.set_text("")
+        except TimeoutError:
+            raise StopIteration()
 
     def text_changed(self, button):
         for g in (self._EVENT, self._PATH):
