@@ -1,18 +1,16 @@
 #! /usr/bin/python3
 # encoding: utf-8
-from concurrent.futures._base import Future
-from concurrent.futures.thread import ThreadPoolExecutor
-from logging import warning
+import os
+from concurrent.futures import Future, ThreadPoolExecutor
 from threading import Lock
 
-import sqlalchemy as sql
 import gi
-
-from shotwell_model import Event, Photo, Issue, Data
-
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, GdkPixbuf, GLib
-import os
+
+import sqlalchemy as sql
+
+from shotwell_model import Event, Photo, Issue, Data
 
 thread_pool = ThreadPoolExecutor()
 
@@ -97,6 +95,10 @@ class MatchFolderEventWindow(Gtk.Window):
         self.button[self._PATH].connect("toggled", self.chose, self._PATH)
         chooseBox.pack_start(self.button[self._PATH], True, True, 0)
 
+        self.entry = Gtk.Entry()
+        self.entry.connect("changed", self.text_changed)
+        chooseBox.pack_start(self.entry, True, True, 0)
+
         event_label = Gtk.Label(label="Event:")
         chooseBox.pack_start(event_label, False, True, 0)
         self.button.insert(self._EVENT, Gtk.ToggleButton(label="Event"))
@@ -109,10 +111,6 @@ class MatchFolderEventWindow(Gtk.Window):
         lastButton = Gtk.Button(label="Last", use_underline=True)
         lastButton.connect("clicked", self.next, self._LAST)
         CASBox.pack_start(lastButton, True, True, 0)
-
-        self.entry = Gtk.Entry()
-        self.entry.connect("changed", self.text_changed)
-        CASBox.pack_start(self.entry, True, True, 0)
 
         nextButton = Gtk.Button(label="next", use_underline=True)
         nextButton.connect("clicked", self.next, self._NEXT)
@@ -236,6 +234,7 @@ class MatchFolderEventWindow(Gtk.Window):
     def next(self, button, direction):
         if self._busy_lock.acquire(blocking=False):
             self._label_next_button_cancel()
+
             current_issue = self._data_iter.this()
             if self.button[self._EVENT].get_active() or self.button[self._PATH].get_active():
                 self.results[self._data_iter.key()] = (self.entry.get_text(), )
@@ -245,6 +244,7 @@ class MatchFolderEventWindow(Gtk.Window):
                 current_issue = self._data_iter.next()
             else:
                 current_issue = self._data_iter.prev()
+
             self.fill_view(current_issue)
             self.progressbar.set_fraction((int(self._data_iter) + 1.0) / len(self._data))
             self.progressbar.set_text("%2s of %2s" % (int(self._data_iter), len(self._data)))
