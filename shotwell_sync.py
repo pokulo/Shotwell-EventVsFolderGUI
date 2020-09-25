@@ -91,18 +91,17 @@ class MatchFolderEventWindow(Gtk.Window):
 
         path_label = Gtk.Label(label="Pfad:")
         chooseBox.pack_start(path_label, False, True, 0)
-        self.button.insert(self._PATH, Gtk.ToggleButton(label="Pfad"))
-        self.button[self._PATH].connect("toggled", self.chose, self._PATH)
+        self.button.insert(self._PATH, Gtk.Button(label="Pfad"))
+        self.button[self._PATH].connect("clicked", self.chose, self._PATH)
         chooseBox.pack_start(self.button[self._PATH], True, True, 0)
 
         self.entry = Gtk.Entry()
-        self.entry.connect("changed", self.text_changed)
         chooseBox.pack_start(self.entry, True, True, 0)
 
         event_label = Gtk.Label(label="Event:")
         chooseBox.pack_start(event_label, False, True, 0)
-        self.button.insert(self._EVENT, Gtk.ToggleButton(label="Event"))
-        self.button[self._EVENT].connect("toggled", self.chose, self._EVENT)
+        self.button.insert(self._EVENT, Gtk.Button(label="Event"))
+        self.button[self._EVENT].connect("clicked", self.chose, self._EVENT)
         chooseBox.pack_start(self.button[self._EVENT], True, True, 0)
 
         CASBox = Gtk.Box(spacing=6)
@@ -210,18 +209,12 @@ class MatchFolderEventWindow(Gtk.Window):
         self._add_images_async(issue)
 
     def chose(self, button, chosen):
-        if button.get_active() and not self.button[not chosen].get_active():
-            self.entry.disconnect_by_func(self.text_changed)
-            self.entry.set_text(self._data[self._data_iter][chosen])
-            self.entry.connect("changed", self.text_changed)
-        if self.button[not chosen].get_active() and not button.get_active():
-            self.entry.disconnect_by_func(self.text_changed)
-            self.entry.set_text(self._data[self._data_iter][not chosen])
-            self.entry.connect("changed", self.text_changed)
+        if chosen is self._PATH:
+            self.entry.set_text(self._data_iter.this().folder)
+        elif chosen is self._EVENT:
+            self.entry.set_text(self._data_iter.this().event.name)
         else:
-            self.entry.disconnect_by_func(self.text_changed)
             self.entry.set_text("")
-            self.entry.connect("changed", self.text_changed)
 
     def _label_next_button_cancel(self):
         for button in self._iter_buttons.values():
@@ -235,11 +228,6 @@ class MatchFolderEventWindow(Gtk.Window):
         if self._busy_lock.acquire(blocking=False):
             self._label_next_button_cancel()
 
-            current_issue = self._data_iter.this()
-            if self.button[self._EVENT].get_active() or self.button[self._PATH].get_active():
-                self.results[self._data_iter.key()] = (self.entry.get_text(), )
-            else:
-                self.results[self._data_iter.key()] = (None, current_issue)
             if direction:
                 current_issue = self._data_iter.next()
             else:
@@ -248,26 +236,9 @@ class MatchFolderEventWindow(Gtk.Window):
             self.fill_view(current_issue)
             self.progressbar.set_fraction((int(self._data_iter) + 1.0) / len(self._data))
             self.progressbar.set_text("%2s of %2s" % (int(self._data_iter), len(self._data)))
-            if self._data_iter.key() in self.results:
-                tmp = self.results[self._data_iter.key()]
-                if tmp[0] is not None:
-                    self.button[self._PATH].set_active(tmp[0] == tmp[1][0])
-                    self.button[self._EVENT].set_active(tmp[0] == tmp[1][1])
-                    self.entry.set_text(tmp[0])
-                else:
-                    self.entry.set_text("")
-            else:
-                self.button[self._PATH].set_active(False)
-                self.button[self._EVENT].set_active(False)
-                self.entry.set_text("")
+            self.entry.set_text("")
         else:
             self._cancel_future.cancel()
-
-    def text_changed(self, button):
-        for g in (self._EVENT, self._PATH):
-            self.button[g].disconnect_by_func(self.chose)
-            self.button[g].set_active(False)
-            self.button[g].connect("toggled", self.chose, g)
 
     def commit(self, button):
         for r in self.results.values():
