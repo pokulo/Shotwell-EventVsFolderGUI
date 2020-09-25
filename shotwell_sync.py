@@ -178,11 +178,12 @@ class MatchFolderEventWindow(Gtk.Window):
 
         self._busy_stack.add(self._busy_vbox)
 
+        self._thumbnailgrid_lock = Lock()
         self._thumbnailgrid = Gtk.FlowBox()
-        # self.thumbnailgrid.set_selection_mode(mode=Gtk.SelectionMode.SELECTION_MULTIPLE)
         self._thumbnailgrid.set_valign(Gtk.Align.START)
         self._thumbnailgrid.set_max_children_per_line(30)
         self._thumbnailgrid.set_selection_mode(Gtk.SelectionMode.NONE)
+
         self._done()
 
         self._scrolled_thumbnails.add(self._thumbnailgrid)
@@ -261,18 +262,20 @@ class MatchFolderEventWindow(Gtk.Window):
         files_len = len(issue.files)
         for i, image_file in enumerate(issue.files):
             image_button = ThumbnailButton(image_file.filename)
-            self.thumbnails.append((image_button, image_file))
-            GLib.idle_add(self._add_image, image_button)
+            GLib.idle_add(self._add_image, image_button, image_file)
             self.set_busy_fraction(i, files_len)
 
-    def _add_image(self, image_button):
-        self._thumbnailgrid.add(image_button)
+    def _add_image(self, image_button, image_file):
+        with self._thumbnailgrid_lock:
+            self.thumbnails.append((image_button, image_file))
+            self._thumbnailgrid.add(image_button)
 
     def _add_images_done_callback(self, future):
         GLib.idle_add(self._add_images_done)
 
     def _add_images_done(self):
-        self._thumbnailgrid.show_all()
+        with self._thumbnailgrid_lock:
+            self._thumbnailgrid.show_all()
         self._done()
         if self._busy_lock.locked():
             self._busy_lock.release()
@@ -281,9 +284,10 @@ class MatchFolderEventWindow(Gtk.Window):
         self._busy_future.result()  # raise catched exceptions
 
     def clear_images(self):
-        for image_button, image_file in self.thumbnails:
-            self._thumbnailgrid.remove(image_button)
-        self.thumbnails.clear()
+        with self._thumbnailgrid_lock:
+            for i, (image_button, image_file) in enumerate(self.thumbnails):
+                image_button.destroy()  # automatically removed from container self._thumbnailgrid
+            self.thumbnails.clear()
 
     def scan(self):
         for e in self.dbsession.query(Event).all():
