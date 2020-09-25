@@ -39,6 +39,9 @@ class MatchFolderEventWindow(Gtk.Window):
     _EVENT = 1
     _PATH = 0
 
+    _LAST = False
+    _NEXT = True
+
     def __init__(self, dbsession):
         self._data_iter = None
         self._data = Data()
@@ -81,8 +84,6 @@ class MatchFolderEventWindow(Gtk.Window):
         self._thumbnailgrid.set_max_children_per_line(30)
         self._thumbnailgrid.set_selection_mode(Gtk.SelectionMode.NONE)
 
-        self._done()
-
         self._scrolled_thumbnails.add(self._thumbnailgrid)
         vbox.pack_start(self._scrolled_thumbnails, True, True, 0)
 
@@ -105,8 +106,8 @@ class MatchFolderEventWindow(Gtk.Window):
         CASBox = Gtk.Box(spacing=6)
         vbox.pack_start(CASBox, False, True, 0)
 
-        lastButton = Gtk.Button(label="last", use_underline=True)
-        lastButton.connect("clicked", self.next, False)
+        lastButton = Gtk.Button(label="Last", use_underline=True)
+        lastButton.connect("clicked", self.next, self._LAST)
         CASBox.pack_start(lastButton, True, True, 0)
 
         self.entry = Gtk.Entry()
@@ -114,10 +115,13 @@ class MatchFolderEventWindow(Gtk.Window):
         CASBox.pack_start(self.entry, True, True, 0)
 
         nextButton = Gtk.Button(label="next", use_underline=True)
-        nextButton.connect("clicked", self.next, True)
+        nextButton.connect("clicked", self.next, self._NEXT)
         CASBox.pack_start(nextButton, True, True, 0)
 
-        commitButton = Gtk.Button(label="commit", use_underline=True)
+        self._iter_buttons = {self._NEXT: nextButton, self._LAST: lastButton}
+
+        commitButton = Gtk.Button(label="Commit", use_underline=True)
+        commitButton.set_sensitive(False)
         commitButton.connect("clicked", self.commit)
         CASBox.pack_start(commitButton, True, True, 0)
 
@@ -127,21 +131,13 @@ class MatchFolderEventWindow(Gtk.Window):
         self._busy_progressbar.set_fraction(fraction/all)
         self._busy_progressbar.set_text("%s of %s" % (fraction, all))
 
-    def _busy(self):
-        pass
-
-    def _done(self):
-        pass
-
     def toggle_select_all_images(self, sender):
         all_selected = all(image_button.selected for image_button, image_file in self.thumbnails)
         for image_button, image_file in self.thumbnails:
             image_button.selected = not all_selected
 
     def _add_images_async(self, issue):
-        self._busy()
         self.clear_images()
-        self._cancel_future.cancel()
         self._cancel_future = Future()
         self._busy_future = thread_pool.submit(self._load_images, issue=issue, cancel_future=self._cancel_future)
         self._busy_future.add_done_callback(self._add_images_done_callback)
@@ -156,6 +152,8 @@ class MatchFolderEventWindow(Gtk.Window):
             self.set_busy_fraction(i+1, files_len)
 
     def _add_image(self, image_button, image_file):
+        if self._cancel_future.cancelled():
+            return
         with self._thumbnailgrid_lock:
             self.thumbnails.append((image_button, image_file))
             self._thumbnailgrid.add(image_button)
@@ -165,9 +163,9 @@ class MatchFolderEventWindow(Gtk.Window):
         GLib.idle_add(self._add_images_done)
 
     def _add_images_done(self):
-        self._done()
         if self._busy_lock.locked():
             self._busy_lock.release()
+            self._label_iter_buttons_reset()
         else:
             raise Exception("Programming error: self._busy_lock allready released!?")
         self._busy_future.result()  # raise catched exceptions
@@ -227,35 +225,43 @@ class MatchFolderEventWindow(Gtk.Window):
             self.entry.set_text("")
             self.entry.connect("changed", self.text_changed)
 
+    def _label_next_button_cancel(self):
+        for button in self._iter_buttons.values():
+            button.set_label("Cancel")
+
+    def _label_iter_buttons_reset(self):
+        for direction in self._iter_buttons:
+            self._iter_buttons[direction].set_label("Next" if direction is self._NEXT else "Last")
+
     def next(self, button, direction):
-        try:
-            if self._busy_lock.acquire(timeout=0):
-                current_issue = self._data_iter.this()
-                if self.button[self._EVENT].get_active() or self.button[self._PATH].get_active():
-                    self.results[self._data_iter.key()] = (self.entry.get_text(), )
+        if self._busy_lock.acquire(blocking=False):
+            self._label_next_button_cancel()
+            current_issue = self._data_iter.this()
+            if self.button[self._EVENT].get_active() or self.button[self._PATH].get_active():
+                self.results[self._data_iter.key()] = (self.entry.get_text(), )
+            else:
+                self.results[self._data_iter.key()] = (None, current_issue)
+            if direction:
+                current_issue = self._data_iter.next()
+            else:
+                current_issue = self._data_iter.prev()
+            self.fill_view(current_issue)
+            self.progressbar.set_fraction((int(self._data_iter) + 1.0) / len(self._data))
+            self.progressbar.set_text("%2s of %2s" % (int(self._data_iter), len(self._data)))
+            if self._data_iter.key() in self.results:
+                tmp = self.results[self._data_iter.key()]
+                if tmp[0] is not None:
+                    self.button[self._PATH].set_active(tmp[0] == tmp[1][0])
+                    self.button[self._EVENT].set_active(tmp[0] == tmp[1][1])
+                    self.entry.set_text(tmp[0])
                 else:
-                    self.results[self._data_iter.key()] = (None, current_issue)
-                if direction:
-                    current_issue = self._data_iter.next()
-                else:
-                    current_issue = self._data_iter.prev()
-                self.fill_view(current_issue)
-                self.progressbar.set_fraction((int(self._data_iter) + 1.0) / len(self._data))
-                self.progressbar.set_text("%2s of %2s" % (int(self._data_iter), len(self._data)))
-                if self._data_iter.key() in self.results:
-                    tmp = self.results[self._data_iter.key()]
-                    if tmp[0] is not None:
-                        self.button[self._PATH].set_active(tmp[0] == tmp[1][0])
-                        self.button[self._EVENT].set_active(tmp[0] == tmp[1][1])
-                        self.entry.set_text(tmp[0])
-                    else:
-                        self.entry.set_text("")
-                else:
-                    self.button[self._PATH].set_active(False)
-                    self.button[self._EVENT].set_active(False)
                     self.entry.set_text("")
-        except TimeoutError:
-            raise StopIteration()
+            else:
+                self.button[self._PATH].set_active(False)
+                self.button[self._EVENT].set_active(False)
+                self.entry.set_text("")
+        else:
+            self._cancel_future.cancel()
 
     def text_changed(self, button):
         for g in (self._EVENT, self._PATH):
