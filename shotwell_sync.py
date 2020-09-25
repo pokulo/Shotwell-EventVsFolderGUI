@@ -118,7 +118,6 @@ class MatchFolderEventWindow(Gtk.Window):
         self._iter_buttons = {self._NEXT: nextButton, self._LAST: lastButton}
 
         commitButton = Gtk.Button(label="Commit", use_underline=True)
-        commitButton.set_sensitive(False)
         commitButton.connect("clicked", self.commit)
         CASBox.pack_start(commitButton, True, True, 0)
 
@@ -241,44 +240,42 @@ class MatchFolderEventWindow(Gtk.Window):
             self._cancel_future.cancel()
 
     def commit(self, button):
-        for r in self.results.values():
-            e = self.dbsession.query(Event).get(r[1][2].id)
-            if r[0] is None:
-                print("keep both %s and %s" % (r[1][self._PATH], r[1][self._EVENT]))
-            else:
-                if r[0] == "":
-                    print("")
-                    e = self.dbsession.query(Event).filter(Event.name.like())
-                else:
-                    if r[0] != r[1][self._EVENT]:
-                        print("rename event %s to %s: " % (r[1][self._EVENT], r[0]))
-                        e.name = r[0]
-                        self.dbsession.merge(e)
-                    if r[0] != r[1][self._PATH]:
-                        prefix = "/".join(e.photos[0].filename.split("/")[:3])
-                        dst = prefix + "/" + r[0]
+        issue = self._data_iter.this()
+        label = self.entry.get_text()
+        if not label:
+            print("keep both %s and %s" % (r[1][self._PATH], r[1][self._EVENT]))
+        else:
+            if label != issue.event.name:
+                print("rename event %s to %s: " % (issue.event, label))
+                issue.event.name = label
+                # self.dbsession.merge(issue.event)
 
-                        print("move photos from %s to %s" % (prefix + r[1][self._PATH], dst))
+
+            if label != issue.folder:
+                prefix = "/".join(issue.files[0].filename.split("/")[:3])
+                dst = prefix + "/" + label
+
+                print("move photos from %s to %s" % (prefix + issue.folder, dst))
+                try:
+                    print("os.mkdir(dst)")
+                except FileExistsError:
+                    print("mkdir: %s already exists.." % dst)
+                for p in issue.files:
+                    ph = self.dbsession.query(Photo).get(p.id)
+                    oldfilename = ph.filename
+                    ph.filename = dst + "/"+ ph.filename.split("/")[-1]
+                    tryagain = True
+                    while tryagain:
                         try:
-                            os.mkdir(dst)
+                            pass
+                            # os.rename(oldfilename, ph.filename)
+                            print("os.rename( %s, %s )" % (oldfilename,ph.filename))
+                            tryagain = False
                         except FileExistsError:
-                            print("mkdir: %s already exists.." % dst)
-                        for p in e.photos:
-                            ph = self.dbsession.query(Photo).get(p.id)
-                            oldfilename = ph.filename
-                            ph.filename = dst + "/"+ ph.filename.split("/")[-1]
-                            tryagain = True
-                            while tryagain:
-                                try:
-                                    pass
-                                    # os.rename(oldfilename, ph.filename)
-                                    print("os.rename( %s, %s )" % (oldfilename,ph.filename))
-                                    tryagain = False
-                                except FileExistsError:
-                                    print("os.rename: %s already existed!" % ph.filename)
-                                    ph.filename = ph.filename.lower().replace(".jpg", "1.jpg")
-                            # session.merge(ph)
-                            # session.commit()
+                            print("os.rename: %s already existed!" % ph.filename)
+                            ph.filename = ph.filename.lower().replace(".jpg", "1.jpg")
+                    # session.merge(ph)
+                    # session.commit()
 
         self.dbsession.commit()
         self.results = {}
