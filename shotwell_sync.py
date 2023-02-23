@@ -40,9 +40,10 @@ class MatchFolderEventWindow(Gtk.Window):
     _LAST = False
     _NEXT = True
 
-    def __init__(self, dbsession):
+    def __init__(self, dbsession, data_directory):
         self._data_iter = None
         self._data = Data()
+        self._data_directory = data_directory
         self.results = {}
         self.thumbnails = []
         self.dbsession = dbsession
@@ -285,14 +286,15 @@ class MatchFolderEventWindow(Gtk.Window):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Shotwell Event <-> Folder Sync")
-    parser.add_argument("source", nargs="?", type=str, default="/home/poku/.local/share/shotwell/data/photo.db")
+    parser.add_argument("db_path", nargs="?", type=str, default="/home/poku/.local/share/shotwell/data/photo.db")
+    parser.add_argument("data_directory", nargs="?", type=str, default="/data/Fotos")
     args = parser.parse_args()
 
-    engine = sql.create_engine("sqlite:///"+args.source)
+    engine = sql.create_engine("sqlite:///"+args.db_path)
     connection = engine.connect()
     Session = sql.orm.sessionmaker(bind=engine)
 
-    win = MatchFolderEventWindow(Session())
+    win = MatchFolderEventWindow(Session(), data_directory=args.data_directory)
     win.connect("delete-event", Gtk.main_quit)
     win.show_all()
     Gtk.main()
