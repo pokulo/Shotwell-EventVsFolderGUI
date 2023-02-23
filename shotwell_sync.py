@@ -1,5 +1,6 @@
-#! /usr/bin/python3
+#! /bin/env python3
 # encoding: utf-8
+
 import os
 from concurrent.futures import Future, ThreadPoolExecutor
 from threading import Lock
@@ -177,25 +178,32 @@ class MatchFolderEventWindow(Gtk.Window):
             self.thumbnails.clear()
 
     def scan(self):
-        for e in self.dbsession.query(Event).all():
-            for p in e.photos:
-                folders = p.filename.split("/")
-                if ".jpg" in folders[3].lower():
-                    folder = e.name  # folders[2] --ignore
-                else:
-                    folder = "/".join(folders[3:-1])
+        for event in self.dbsession.query(Event).all():
+            if event.name is None:
+                if any(p.filename.lower().endswith(".jpg") for p in event.photos):
+                    print("JPGs in None-named Event: {}".format([p.filename for p in event.photos
+                                                                if p.filename.lower().endswith(".jpg")]))
+                # TODO: do not fully ignore None-named events
+                continue
 
-                if e.name is None:
-                    if os.path.exists(p.filename):
+            for photo in event.photos:
+                photo_path = photo.filename.split("/")
+                if ".jpg" in photo_path[-1].lower():
+                    folder = event.name  # folders[2] --ignore
+                else:
+                    folder = "/".join(photo_path[3:-1])
+
+                if event.name is None:
+                    if os.path.exists(photo.filename):
                         print(folder + " # --kein event zugeordet!?--")
                     else:
-                        print(p.filename + " was not found on disc!")
+                        print(photo.filename + " was not found on disc!")
 
-                elif folder != e.name:
+                elif folder != event.name:
                     if folder not in self._data:
-                        self._data[folder] = Issue(folder, e, [p])
+                        self._data[folder] = Issue(folder, event, [photo])
                     else:
-                        self._data[folder].files.append(p)
+                        self._data[folder].files.append(photo)
         self.progressbar.set_fraction(0.0)
         self.progressbar.set_text("%s of %s" % (0, len(self._data)))
         self.progressbar.set_show_text(True)
